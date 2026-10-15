@@ -93,6 +93,7 @@
 
   .tx-form{margin-top:1.5rem;}
   .type-tabs,.filter-tabs{display:flex;gap:1.25rem;margin-bottom:1.25rem;}
+  .list-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;}
   .tab{
     background:none;border:none;border-bottom:2px solid transparent;
     color:var(--ink-soft);font-size:0.85rem;padding:0 0 0.4rem;cursor:pointer;
@@ -260,10 +261,13 @@
 
     <p id="monthFilterNote" class="month-filter-note" hidden></p>
 
-    <div class="filter-tabs" id="filterTabs">
-      <button type="button" data-filter="all" class="tab active">Semua</button>
-      <button type="button" data-filter="income" class="tab">Pemasukan</button>
-      <button type="button" data-filter="expense" class="tab">Pengeluaran</button>
+    <div class="list-toolbar">
+      <div class="filter-tabs" id="filterTabs">
+        <button type="button" data-filter="all" class="tab active">Semua</button>
+        <button type="button" data-filter="income" class="tab">Pemasukan</button>
+        <button type="button" data-filter="expense" class="tab">Pengeluaran</button>
+      </div>
+      <button type="button" id="exportCsv" class="text-btn">Ekspor CSV</button>
     </div>
 
     <div id="txList" class="tx-list"></div>
@@ -330,6 +334,7 @@
   const monthFilterNote = document.getElementById('monthFilterNote');
 
   const filterTabs = document.getElementById('filterTabs');
+  const exportCsvBtn = document.getElementById('exportCsv');
   const txListEl = document.getElementById('txList');
   const emptyStateEl = document.getElementById('emptyState');
 
@@ -339,6 +344,7 @@
   let currentFilter = 'all';
   let currentType = 'expense';
   let currentMonthFilter = null; // format 'YYYY-MM', or null = semua bulan
+  let visibleTx = []; // transaksi yang sedang tampil (sesuai filter), dipakai untuk ekspor CSV
 
   const rupiah = (n) => new Intl.NumberFormat('id-ID', {
     style: 'currency', currency: 'IDR', minimumFractionDigits: 0, maximumFractionDigits: 0
@@ -494,6 +500,47 @@
   }
 
   // ---- Render ----
+  // ---- Ekspor CSV ----
+  function csvCell(value) {
+    let str = String(value ?? '');
+    // Cegah formula injection saat dibuka di Excel/Sheets
+    if (/^[=+\-@\t\r]/.test(str)) str = "'" + str;
+    return '"' + str.replace(/"/g, '""') + '"';
+  }
+
+  function exportCsv() {
+    if (visibleTx.length === 0) {
+      alert('Tidak ada transaksi untuk diekspor.');
+      return;
+    }
+    const SEP = ';'; // titik koma: terbuka rapi di Excel berlokal Indonesia & Google Sheets
+    const header = ['Tanggal', 'Tipe', 'Kategori', 'Deskripsi', 'Jumlah'];
+    const rows = visibleTx.map(t => [
+      t.date,
+      t.type === 'income' ? 'Pemasukan' : 'Pengeluaran',
+      t.category || 'Lainnya',
+      t.description,
+      t.amount
+    ]);
+    const csv = [header, ...rows]
+      .map(r => r.map((c, i) => (i === 4 ? c : csvCell(c))).join(SEP))
+      .join('\r\n');
+
+    // BOM agar karakter UTF-8 terbaca benar di Excel
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const suffix = currentMonthFilter || new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `buku-kas-${suffix}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  exportCsvBtn.addEventListener('click', exportCsv);
+
   function render() {
     const income = allTx.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
     const expense = allTx.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
@@ -511,6 +558,8 @@
       const bt = b.createdAt?.seconds || 0;
       return bt - at;
     });
+
+    visibleTx = sorted;
 
     if (currentMonthFilter) {
       monthFilterNote.hidden = false;
